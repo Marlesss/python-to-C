@@ -10,7 +10,7 @@ import Data.Functor
 import Control.Monad.State.Lazy
 
 defaultCProgram :: CG.Program
-defaultCProgram = CG.Program [CG.Library "stdio.h"] []
+defaultCProgram = CG.Program [CG.Library "stdio.h", CG.Library "stdbool.h"] []
 
 type NameBinds = [(PG.Expr, (CG.Expr, [CG.Expr] -> [CG.Expr]))]
 
@@ -37,15 +37,13 @@ removingNameBind name = withState $ filter $ (/= PG.Var name) . fst
 statementToC :: PG.Statement -> State NameBinds CG.Program
 statementToC (PG.If cond prog) = do
   condC <- exprToC cond
-  outscopeNameBinds <- get
-  let (CG.Program impB mainB) = evalState (translate prog) outscopeNameBinds
-  return $ CG.Program impB [CG.If condC mainB]
+  (CG.Program impB mainB) <- translateProgNoModify prog
+  pure $ CG.Program impB [CG.If condC mainB]
 statementToC (PG.IfElse cond prog1 prog2) = do
   condC <- exprToC cond
-  outscopeNameBinds <- get
-  let (CG.Program impB1 mainB1) = evalState (translate prog1) outscopeNameBinds
-  let (CG.Program impB2 mainB2) = evalState (translate prog2) outscopeNameBinds
-  return $ CG.Program (impB1 <> impB2) [CG.IfElse condC mainB1 mainB2]
+  (CG.Program impB1 mainB1) <- translateProgNoModify prog1
+  (CG.Program impB2 mainB2) <- translateProgNoModify prog2
+  pure $ CG.Program (impB1 <> impB2) [CG.IfElse condC mainB1 mainB2]
 statementToC (PG.Define varName typeName)        = removingNameBind varName $ pure $
                                                      fromStatement $ CG.Define varName (typeToC typeName)
 statementToC (PG.DefineSet varName typeName val) = removingNameBind varName $ do
@@ -57,6 +55,18 @@ statementToC (PG.Set varName val) = do
 statementToC (PG.Expr expr) = do
   valC <- exprToC expr
   pure $ fromStatement $ CG.Expr valC
+statementToC (PG.For name range prog) = do
+  rangeC <- rangeToC range
+  (CG.Program impB mainB) <- removingNameBind name (translateProgNoModify prog)
+  pure $ CG.Program impB [CG.For name rangeC mainB]
+
+rangeToC :: PG.Range -> State NameBinds CG.Range
+rangeToC range = do
+  fromC <- exprToC (PG.from range)
+  toC <- exprToC (PG.to range)
+  pure $ case range of
+    (PG.Inclusive _ _) -> CG.Inclusive fromC toC
+    (PG.Exclusive _ _) -> CG.Exclusive fromC toC
 
 exprToC :: PG.Expr -> State NameBinds CG.Expr
 exprToC (PG.Call e args) = do
@@ -69,12 +79,22 @@ exprToC e@(PG.Var name)      = do
   bindedNames <- get
   pure $ fromMaybe (CG.Var name) $ fst <$> lookup e bindedNames
 exprToC (PG.Plus e1 e2)    = binaryExprToC CG.Plus e1 e2
-exprToC (PG.Minus e1 e2)   = binaryExprToC CG.Plus e1 e2
-exprToC (PG.Times e1 e2)   = binaryExprToC CG.Plus e1 e2
-exprToC (PG.Div e1 e2)     = binaryExprToC CG.Plus e1 e2
+exprToC (PG.Minus e1 e2)   = binaryExprToC CG.Minus e1 e2
+exprToC (PG.Times e1 e2)   = binaryExprToC CG.Times e1 e2
+exprToC (PG.Div e1 e2)     = binaryExprToC CG.Div e1 e2
+exprToC (PG.LT e1 e2)      = binaryExprToC CG.LT e1 e2
+exprToC (PG.LE e1 e2)      = binaryExprToC CG.LE e1 e2
+exprToC (PG.GT e1 e2)      = binaryExprToC CG.GT e1 e2
+exprToC (PG.GE e1 e2)      = binaryExprToC CG.GE e1 e2
+exprToC (PG.EQ e1 e2)      = binaryExprToC CG.EQ e1 e2
+exprToC (PG.NQ e1 e2)      = binaryExprToC CG.NQ e1 e2
+exprToC (PG.And e1 e2)     = binaryExprToC CG.And e1 e2
+exprToC (PG.Or e1 e2)      = binaryExprToC CG.Or e1 e2
+exprToC (PG.Not e)        = exprToC e <&> CG.Not
 exprToC (PG.Brack e)       = exprToC e <&> CG.Brack
 exprToC (PG.IntVal val)    = pure $ CG.IntVal val
 exprToC (PG.StrVal val)    = pure $ CG.StrVal val
+exprToC (PG.BoolVal val)   = pure $ CG.BoolVal val
 
 binaryExprToC :: (CG.Expr -> CG.Expr -> CG.Expr) -> PG.Expr -> PG.Expr -> State NameBinds CG.Expr
 binaryExprToC func e1 e2 = do
@@ -85,3 +105,9 @@ binaryExprToC func e1 e2 = do
 typeToC :: PG.PrimitiveType -> CG.PrimitiveType
 typeToC PG.Int = CG.Int
 typeToC PG.String = CG.String
+typeToC PG.Bool = CG.Bool
+
+translateProgNoModify :: PG.Program -> State NameBinds CG.Program
+translateProgNoModify prog = do
+  outscopeNameBinds <- get
+  pure $ evalState (translate prog) outscopeNameBinds

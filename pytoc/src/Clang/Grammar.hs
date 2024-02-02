@@ -5,11 +5,13 @@ module Clang.Grammar
   , Statement(..)
   , PrimitiveType(..)
   , Expr(..)
+  , Range(..)
   , VarName
   , Block
   ) where
 
 import Prettyprinter
+import Prelude hiding (LT, GT, EQ)
 
 data Program = Program ImportBlock MainBlock deriving Show
 
@@ -21,6 +23,7 @@ type MainBlock = Block
 data PrimitiveType
   = Int
   | String
+  | Bool
   deriving Show
 type VarName = String
 
@@ -31,6 +34,7 @@ data Statement
   | Expr Expr
   | If Expr Block
   | IfElse Expr Block Block
+  | For VarName Range Block
   deriving Show
 
 data Expr
@@ -38,12 +42,28 @@ data Expr
   | Minus Expr Expr
   | Times Expr Expr
   | Div Expr Expr
+  | LT Expr Expr
+  | LE Expr Expr
+  | GT Expr Expr
+  | GE Expr Expr
+  | EQ Expr Expr
+  | NQ Expr Expr
+  | And Expr Expr
+  | Or Expr Expr
+  | Not Expr
   | Call Expr [Expr]
   | Brack Expr
   | IntVal Int
   | StrVal String
+  | BoolVal Bool
   | Var VarName
   deriving (Show, Eq, Ord)
+
+data Range
+  = Inclusive {from :: Expr, to :: Expr}
+  | Exclusive {from :: Expr, to :: Expr}
+  deriving Show
+
 
 instance Semigroup Program where
   (Program impB1 mainB1) <> (Program impB2 mainB2) = Program (impB1 <> impB2) (mainB1 <> mainB2)
@@ -59,10 +79,20 @@ instance Pretty Expr where
   pretty (Minus e1 e2) = prettyBinary e1 "-" e2
   pretty (Times e1 e2) = prettyBinary e1 "*" e2
   pretty (Div e1 e2)   = prettyBinary e1 "/" e2
+  pretty (LT e1 e2)    = prettyBinary e1 "<" e2
+  pretty (LE e1 e2)    = prettyBinary e1 "<=" e2
+  pretty (GT e1 e2)    = prettyBinary e1 ">" e2
+  pretty (GE e1 e2)    = prettyBinary e1 ">=" e2
+  pretty (EQ e1 e2)    = prettyBinary e1 "==" e2
+  pretty (NQ e1 e2)    = prettyBinary e1 "!=" e2
+  pretty (And e1 e2)   = prettyBinary e1 "&&" e2
+  pretty (Or e1 e2)    = prettyBinary e1 "||" e2
+  pretty (Not e)       = pretty "!" <> parens (pretty e)
   pretty (Call e args) = pretty e <> parens (mconcat (punctuate (comma <> space) $ map pretty args))
   pretty (Brack e)     = parens $ pretty e
   pretty (IntVal x)    = pretty x
   pretty (StrVal s)    = dquotes $ pretty s
+  pretty (BoolVal v)    = pretty (if v then "true" else "false")
   pretty (Var name)    = pretty name
 
 prettyBinary :: Expr -> String -> Expr -> Doc a
@@ -76,10 +106,21 @@ instance Pretty Statement where
   pretty (If cond block)              = pretty "if" <+> parens (pretty cond) <+> prettyBlock block
   pretty (IfElse cond b1 b2)          = pretty "if" <+> parens (pretty cond) <+> prettyBlock b1
                                                     <+> pretty "else" <+> prettyBlock b2
+  pretty (For name range block)       = let var = Var name in
+                                        pretty "for" <+> parens (
+                                                          pretty (DefineSet name Int (from range))
+                                                          <+> pretty (comp var (to range)) <> semi
+                                                          <+> pretty "++" <> pretty name
+                                                   ) <+> prettyBlock block
+                                        where
+                                          comp = case range of
+                                            (Inclusive _ _) -> LE
+                                            (Exclusive _ _) -> LT
 
 instance Pretty PrimitiveType where
   pretty Int = pretty "int"
   pretty String = pretty "char*"
+  pretty Bool = pretty "bool"
 
 prettyBlock :: Block -> Doc a
 prettyBlock stmts = lbrace <> line <> (indent tabWidth (vsep (map pretty stmts))) <> line <> rbrace
