@@ -16,7 +16,28 @@ type NameBinds = [(PG.Expr, (CG.Expr, [CG.Expr] -> [CG.Expr]))]
 
 defaultNameBinds :: NameBinds
 defaultNameBinds =
-  [ (PG.Var "print", (CG.Var "printf", \args -> CG.StrVal (intercalate " " (replicate (length args) "%s")) : args)) ]
+  [ (PG.Var "printStr", (CG.Var "printf", printStr))
+  , (PG.Var "printInt", (CG.Var "printf", printInt))
+  , (PG.Var "readInt", (CG.Var "scanf", scanInt))
+--  , (PG.Var "readStr", (CG.Var "scanf", scanStr))
+  ]
+
+printStr, printInt, scanInt :: [CG.Expr] -> [CG.Expr]
+printStr = printf "%s"
+printInt = printf "%d"
+scanInt = scanf "%d"
+
+--scanStr :: [CG.Expr] -> [CG.Expr]
+--scanStr = scanf "%s"
+
+printf, scanf :: String -> [CG.Expr] -> [CG.Expr]
+printf f args = format f (length args) : args
+scanf f args = format f (length args) : map addLink args where
+  addLink (CG.Var varName) = CG.Var ("&" ++ varName)
+  addLink v = v
+
+format :: String -> Int -> CG.Expr
+format f len = CG.StrVal (intercalate " " (replicate len f))
 
 fromStatement :: CG.Statement -> CG.Program
 fromStatement s = CG.Program [] [s]
