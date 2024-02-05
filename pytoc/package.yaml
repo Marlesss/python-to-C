@@ -39,6 +39,8 @@ library:
     - array
     - mtl
     - prettyprinter
+  build-tools:
+    - happy
 
 
 executables:
